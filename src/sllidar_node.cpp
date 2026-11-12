@@ -175,6 +175,9 @@ class SLlidarNode : public rclcpp::Node
             return false;
 
         RCLCPP_DEBUG(this->get_logger(),"Stop motor");
+        // stop scanning first: a C1 ignores the serial DTR line setMotorSpeed(0) uses and keeps
+        // spinning while it scans
+        drv->stop();
         drv->setMotorSpeed(0);
         return true;
     }
@@ -196,7 +199,12 @@ class SLlidarNode : public rclcpp::Node
                 return false;
             }
         
-            ans=drv->startScan(0,1);
+            // back in the scan mode it was started with (startScan(0,1) would pick the lidar's
+            // "typical" mode, DenseBoost on a C1, whatever scan_mode says)
+            if (scan_mode_id != sl_u16(-1))
+                ans = drv->startScanExpress(false, scan_mode_id);
+            else
+                ans = drv->startScan(0,1);
             if (SL_IS_FAIL(ans)) {
                 RCLCPP_WARN(this->get_logger(), "Failed to start scan: %08x", ans);
             }
@@ -346,6 +354,7 @@ public:
                     }
                     op_result = SL_RESULT_OPERATION_FAIL;
                 } else {
+                    scan_mode_id = selectedScanMode;
                     op_result = drv->startScanExpress(false /* not force scan */, selectedScanMode, 0, &current_scan_mode);
                 }
             }
@@ -486,6 +495,7 @@ public:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr info_pub;
     std::string info_model = "unknown", info_firmware = "unknown", info_serial = "", info_health = "unknown";
     int info_hardware = -1;
+    sl_u16 scan_mode_id = sl_u16(-1);   // the scan_mode parameter's mode, for start_motor
     rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr start_motor_service;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr stop_motor_service;

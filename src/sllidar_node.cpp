@@ -35,6 +35,9 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <std_srvs/srv/empty.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <sstream>
+#include <vector>
 #include "sl_lidar.h"
 #include "math.h"
 
@@ -60,6 +63,8 @@ class SLlidarNode : public rclcpp::Node
     {
 
       scan_pub = this->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::QoS(rclcpp::KeepLast(10)));
+      // /lidar/info: what the lidar says about itself, once, latched (for a settings page)
+      info_pub = this->create_publisher<std_msgs::msg::String>("/lidar/info", rclcpp::QoS(1).transient_local());
       
     }
 
@@ -117,6 +122,13 @@ class SLlidarNode : public rclcpp::Node
             sprintf(sn_str + (pos * 2),"%02X", devinfo.serialnum[pos]);
         }
         RCLCPP_INFO(this->get_logger(),"SLLidar S/N: %s",sn_str);
+        char model_str[8], fw_str[16];
+        snprintf(model_str, sizeof(model_str), "0x%02x", devinfo.model);
+        snprintf(fw_str, sizeof(fw_str), "%d.%02d", devinfo.firmware_version >> 8, devinfo.firmware_version & 0xFF);
+        info_model = model_str;
+        info_firmware = fw_str;
+        info_hardware = (int)devinfo.hardware_version;
+        info_serial = sn_str;
         RCLCPP_INFO(this->get_logger(),"Firmware Ver: %d.%02d",devinfo.firmware_version>>8, devinfo.firmware_version & 0xFF);
         RCLCPP_INFO(this->get_logger(),"Hardware Rev: %d",(int)devinfo.hardware_version);
         return true;
@@ -131,12 +143,15 @@ class SLlidarNode : public rclcpp::Node
             RCLCPP_INFO(this->get_logger(),"SLLidar health status : %d", healthinfo.status);
             switch (healthinfo.status) {
                 case SL_LIDAR_STATUS_OK:
+                    info_health = "OK";
                     RCLCPP_INFO(this->get_logger(),"SLLidar health status : OK.");
                     return true;
                 case SL_LIDAR_STATUS_WARNING:
+                    info_health = "Warning";
                     RCLCPP_INFO(this->get_logger(),"SLLidar health status : Warning.");
                     return true;
                 case SL_LIDAR_STATUS_ERROR:
+                    info_health = "Error";
                     RCLCPP_ERROR(this->get_logger(),"Error, SLLidar internal error detected. Please reboot the device to retry.");
                     return false;
                 default:
@@ -336,6 +351,8 @@ public:
             }
         }
 
+        publish_info(SL_IS_OK(op_result) ? current_scan_mode.scan_mode : nullptr);
+
         if(SL_IS_OK(op_result))
         {
             //default frequent is 10 hz (by motor pwm value),  current_scan_mode.us_per_sample is the number of scan point per us
@@ -442,6 +459,33 @@ public:
 
 
   private:
+    // /lidar/info as JSON: model, firmware, hardware, serial, health, the scan mode in use (null if it
+    // did not start) and every mode the lidar supports
+    void publish_info(const char * mode_in_use)
+    {
+        std::vector<LidarScanMode> modes;
+        if (SL_IS_FAIL(drv->getAllSupportedScanModes(modes))) modes.clear();
+        std::ostringstream j;
+        j << "{\"model\": \"" << info_model << "\", \"firmware\": \"" << info_firmware
+          << "\", \"hardware\": " << info_hardware << ", \"serial\": \"" << info_serial
+          << "\", \"health\": \"" << info_health << "\", \"scan_mode\": ";
+        if (mode_in_use) j << "\"" << mode_in_use << "\""; else j << "null";
+        j << ", \"modes\": [";
+        for (size_t i = 0; i < modes.size(); i++) {
+            char m[160];
+            snprintf(m, sizeof(m), "%s{\"name\": \"%s\", \"max_distance_m\": %.1f, \"sample_khz\": %.1f}",
+                     i ? ", " : "", modes[i].scan_mode, modes[i].max_distance, 1000.0 / modes[i].us_per_sample);
+            j << m;
+        }
+        j << "]}";
+        std_msgs::msg::String msg;
+        msg.data = j.str();
+        info_pub->publish(msg);
+    }
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr info_pub;
+    std::string info_model = "unknown", info_firmware = "unknown", info_serial = "", info_health = "unknown";
+    int info_hardware = -1;
     rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr start_motor_service;
     rclcpp::Service<std_srvs::srv::Empty>::SharedPtr stop_motor_service;

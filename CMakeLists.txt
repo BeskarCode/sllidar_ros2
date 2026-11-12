@@ -35,6 +35,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 ################################################################################
 # Build
@@ -50,6 +51,7 @@ add_executable(sllidar_node	src/sllidar_node.cpp ${SLLIDAR_SDK_SRC})
 target_link_libraries(sllidar_node
   rclcpp::rclcpp
   ${std_srvs_TARGETS}
+  ${std_msgs_TARGETS}
   ${sensor_msgs_TARGETS}
 )
 

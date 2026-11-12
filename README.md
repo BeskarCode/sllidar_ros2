@@ -180,3 +180,9 @@ Notice: different lidar use different serial_baudrate.
 ## RPLIDAR frame
 
 RPLIDAR frame must be broadcasted according to picture shown in rplidar-frame.png
+
+## /lidar/info (BeskarCode fork)
+
+Once the scan starts, `sllidar_node` publishes `/lidar/info` (`std_msgs/String`, latched): a JSON with
+the lidar's model, firmware, hardware, serial number, health, the scan mode in use (`null` if it did
+not start) and every scan mode it supports, so a settings page can offer them.
